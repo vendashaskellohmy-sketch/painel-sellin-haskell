@@ -293,8 +293,11 @@ async function carregarConfig() {
 async function carregarDistribuidores() {
   const rows = await fetchAll(() => sb.from('sellin_distribuidores').select('*').order('dcode', { ascending: true }));
   rows.forEach(r => DIST_MAP[r.dcode] = r);
-  DIST_LIST = rows.filter(r => (r.status||'').toUpperCase() === 'ATIVO')
-                  .sort((a,b) => a.nome.localeCompare(b.nome));
+  // Nao filtra mais por status "Ativo" -- todos os distribuidores cadastrados
+  // entram no filtro e nos calculos (Meta/Realizado de cada um refletem
+  // exatamente o que esta nas planilhas, mes a mes; quem nao vendeu num mes
+  // aparece com Realizado zero naturalmente).
+  DIST_LIST = rows.slice().sort((a,b) => a.nome.localeCompare(b.nome));
 }
 
 async function carregarMensal() {
@@ -304,7 +307,6 @@ async function carregarMensal() {
   const porDistMes = {};  // `${dcode}-${mes}` -> linha combinada
   rows.forEach(r => {
     const info = DIST_MAP[r.dcode] || {};
-    if ((info.status||'').toUpperCase() !== 'ATIVO') return;
     const key = `${r.dcode}-${r.mes}`;
     if (!porDistMes[key]) {
       porDistMes[key] = {
