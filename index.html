@@ -209,7 +209,7 @@ tr:last-child td { border-bottom: none; }
     <div class="scroll-x">
       <table>
         <thead><tr>
-          <th>Distribuidor</th><th>Regional</th><th>Supervisor</th><th id="thFaturado">Faturado</th><th id="thAFaturar">A Faturar</th><th>Total Realizado</th><th>Meta do Período</th><th>Atingimento</th>
+          <th>#</th><th>Distribuidor</th><th>Regional</th><th>Supervisor</th><th id="thFaturado">Faturado</th><th id="thAFaturar">A Faturar</th><th>Total Realizado</th><th>Meta do Período</th><th>Atingimento</th><th>% do Faturamento Total</th>
         </tr></thead>
         <tbody id="distTbody"></tbody>
       </table>
@@ -561,7 +561,7 @@ async function renderTudo() {
     document.getElementById('kpiFaltaSub').textContent = 'Referente a ' + periodoLabel + regLabel;
 
     document.getElementById('tableSectionTitle').textContent = 'Detalhamento por distribuidor — ' + periodoLabel + regLabel;
-    document.getElementById('tableToolbarTitle').textContent = includesOpen ? 'Faturado + A Faturar por distribuidor (somado no período)' : 'Meta e Realizado por distribuidor (somado no período)';
+    document.getElementById('tableToolbarTitle').textContent = (includesOpen ? 'Ranking de faturamento — Faturado + A Faturar por distribuidor (somado no período)' : 'Ranking de faturamento — Meta e Realizado por distribuidor (somado no período)');
     document.getElementById('thFaturado').style.display = includesOpen ? '' : 'none';
     document.getElementById('thAFaturar').style.display = includesOpen ? '' : 'none';
 
@@ -586,14 +586,21 @@ async function renderTudo() {
     const tabelaRows = Object.values(acc).sort((a,b) => b.real - a.real);
     document.getElementById('tableInfo').textContent = tabelaRows.length + ' distribuidores';
 
+    // total faturado por TODOS os distribuidores do recorte atual (filtro de
+    // regional/distribuidor já aplicado em `acc`) -- usado para calcular
+    // quanto cada distribuidor representa do total da empresa no período.
+    const totalRealTabela = tabelaRows.reduce((s, d) => s + d.real, 0);
+
     const tbody = document.getElementById('distTbody');
-    tbody.innerHTML = tabelaRows.map(d => {
+    tbody.innerHTML = tabelaRows.map((d, idx) => {
       const p = d.meta ? (d.real/d.meta*100) : 0;
       const faltaD = d.meta - d.real;
       const barColor = p >= 100 ? 'var(--verde-mid)' : (p >= 70 ? 'var(--roxo)' : 'var(--vermelho)');
       const fatCell = includesOpen ? `<td>${fmtBRL(d.fat)}</td>` : '';
       const afCell  = includesOpen ? `<td>${fmtBRL(d.af)}</td>` : '';
+      const pctTotal = totalRealTabela ? (d.real/totalRealTabela*100) : 0;
       return `<tr>
+        <td style="text-align:center;color:var(--cinza-texto);font-weight:700;">${idx+1}</td>
         <td><strong>${d.nome}</strong><br><span style="font-size:.7rem;color:var(--cinza-texto)">${d.dcode}</span></td>
         <td>${d.regional || '—'}</td>
         <td>${d.supervisor || '—'}</td>
@@ -607,6 +614,7 @@ async function renderTudo() {
           </div>
           <span style="font-size:.72rem;color:var(--cinza-texto);margin-left:6px">${p.toFixed(1)}%</span>
         </td>
+        <td><strong>${pctTotal.toFixed(2)}%</strong></td>
       </tr>`;
     }).join('');
 
