@@ -244,62 +244,86 @@ tr:last-child td { border-bottom: none; }
       <div class="filter-group">
         <label>Categoria</label>
         <select id="f-categoria-linha">
+          <option value="todas">Todas</option>
           <option value="tratamento">Tratamento</option>
           <option value="coloracao">Coloração</option>
           <option value="ohmy">OhMy!</option>
         </select>
       </div>
-      <div class="filter-hint">Usa os mesmos filtros de Período, Regional e Distribuidor da Visão Geral, acima.</div>
+      <div class="filter-group">
+        <label>Linha</label>
+        <select id="f-linha"><option value="todas">Todas as linhas</option></select>
+      </div>
+      <div class="filter-group">
+        <label>Produto (SKU)</label>
+        <select id="f-produto" style="min-width:260px;"><option value="todos">Todos os produtos</option></select>
+      </div>
+      <div class="filter-hint">Usa também os filtros de Período, Regional e Distribuidor da Visão Geral, acima.</div>
     </div>
 
     <div class="kpi-row kpi-row-3">
       <div class="kpi-card real">
-        <div class="kpi-label">Total da categoria no período</div>
+        <div class="kpi-label" id="linhaKpiTotalLabel">Total no período</div>
         <div class="kpi-value" id="linhaKpiTotal">—</div>
         <div class="kpi-sub" id="linhaKpiTotalSub"></div>
       </div>
       <div class="kpi-card meta">
         <div class="kpi-label">% Normal</div>
         <div class="kpi-value" id="linhaKpiNormal">—</div>
-        <div class="kpi-sub">Sobre o total da categoria no período</div>
+        <div class="kpi-sub">Sobre o total do recorte selecionado</div>
       </div>
       <div class="kpi-card pct">
         <div class="kpi-label">% Promoção</div>
         <div class="kpi-value" id="linhaKpiPromo">—</div>
-        <div class="kpi-sub">Sobre o total da categoria no período</div>
+        <div class="kpi-sub">Sobre o total do recorte selecionado</div>
       </div>
     </div>
 
-    <div class="section-title" id="linhaRankingTitle"><span class="badge badge-total">Ranking</span> Linhas dentro da categoria</div>
+    <div class="section-title" id="linhaRankingTitle"><span class="badge badge-total">Ranking</span> Linhas</div>
     <div class="chart-card">
       <div class="chart-wrap" style="height:460px"><canvas id="chartLinhaRanking"></canvas></div>
     </div>
 
     <div class="data-table-wrap" style="margin-top:14px;">
       <div class="table-toolbar">
-        <h3>Ranking de linhas — valor e % da categoria</h3>
+        <h3 id="linhaRankingToolbarTitle">Ranking — valor e %</h3>
         <span class="table-info" id="linhaRankingInfo"></span>
       </div>
       <div class="scroll-x">
         <table>
-          <thead><tr><th>#</th><th>Linha</th><th>Valor</th><th>% da categoria</th></tr></thead>
+          <thead><tr><th>#</th><th id="linhaRankingColLabel">Linha</th><th>Valor</th><th>%</th></tr></thead>
           <tbody id="linhaRankingTbody"></tbody>
         </table>
       </div>
     </div>
 
+    <div class="section-title" id="produtosSectionTitle" style="display:none">
+      <span class="badge badge-total">Produtos</span> Produtos vendidos dentro da linha selecionada
+    </div>
+    <div class="data-table-wrap" id="produtosWrap" style="display:none">
+      <div class="table-toolbar">
+        <h3>Produtos (SKU) dentro da linha</h3>
+        <span class="table-info" id="produtosInfo"></span>
+      </div>
+      <div class="scroll-x">
+        <table>
+          <thead><tr><th>#</th><th>SKU</th><th>Produto</th><th>Valor</th><th>% da linha</th></tr></thead>
+          <tbody id="produtosTbody"></tbody>
+        </table>
+      </div>
+    </div>
+
     <div class="section-title">
-      <span class="badge badge-total">Comparação</span> Distribuidores dentro da linha
-      <select id="f-linha-drill" style="margin-left:10px;background:var(--branco);border:1px solid var(--cinza-borda);border-radius:6px;padding:5px 10px;font-size:.8rem;"></select>
+      <span class="badge badge-total">Comparação</span> Distribuidores no recorte selecionado
     </div>
     <div class="data-table-wrap">
       <div class="table-toolbar">
-        <h3 id="linhaDistToolbarTitle">Distribuidores nesta linha</h3>
+        <h3 id="linhaDistToolbarTitle">Distribuidores</h3>
         <span class="table-info" id="linhaDistInfo"></span>
       </div>
       <div class="scroll-x">
         <table>
-          <thead><tr><th>#</th><th>Distribuidor</th><th>Regional</th><th>Valor</th><th>% da linha</th></tr></thead>
+          <thead><tr><th>#</th><th>Distribuidor</th><th>Regional</th><th>Valor</th><th>% do recorte</th></tr></thead>
           <tbody id="linhaDistTbody"></tbody>
         </table>
       </div>
@@ -452,13 +476,17 @@ async function carregarDiario(inicioIso, fimIso) {
 // Detalhamento por linha/produto (aba "Linhas & Produtos") -- granularidade
 // mensal (não diária), por isso o filtro de período aqui usa a mesma técnica
 // de fração-de-dias-no-mês já usada na tabela "Detalhamento por distribuidor".
-let ITEM_MENSAL = [];
-async function carregarItemMensal() {
-  ITEM_MENSAL = await fetchAll(() =>
-    sb.from('sellin_item_mensal').select('*').eq('ano', CONFIG.ano)
+// Usamos direto o nível de SKU (sellin_item_produto_mensal) como única fonte
+// desta aba -- o nível de linha é derivado disso em memória, então os dois
+// níveis (linha e produto) sempre batem entre si.
+let ITEM_PRODUTO_MENSAL = [];
+async function carregarItemProdutoMensal() {
+  ITEM_PRODUTO_MENSAL = await fetchAll(() =>
+    sb.from('sellin_item_produto_mensal').select('*').eq('ano', CONFIG.ano)
       .order('dcode', { ascending: true })
       .order('categoria', { ascending: true })
       .order('linha', { ascending: true })
+      .order('cod_produto', { ascending: true })
       .order('mes', { ascending: true })
   );
 }
@@ -745,11 +773,12 @@ async function aplicarFiltro() {
 
 // ==========================================================================
 // ABA "LINHAS & PRODUTOS" -- detalhamento por linha/produto dentro de cada
-// categoria, usando sellin_item_mensal. Granularidade mensal (não diária):
-// o filtro de período usa a mesma técnica de fração-de-dias-no-mês já usada
-// na tabela "Detalhamento por distribuidor" da Visão Geral.
+// categoria, usando sellin_item_produto_mensal (nível de SKU). Granularidade
+// mensal (não diária): o filtro de período usa a mesma técnica de
+// fração-de-dias-no-mês já usada na tabela "Detalhamento por distribuidor"
+// da Visão Geral. Filtros em cascata: Categoria -> Linha -> Produto.
 // ==========================================================================
-let ULTIMO_POR_LINHA_DIST = {};
+const CAT_LABEL = { tratamento: 'Tratamento', coloracao: 'Coloração', ohmy: 'OhMy!' };
 
 function fracaoOverlapMes(mi, inicio, fim) {
   const [ms, me] = monthRangeIso(mi);
@@ -760,9 +789,7 @@ function fracaoOverlapMes(mi, inicio, fim) {
   return (dayDiff(ovS, ovE) + 1) / diasMes;
 }
 
-function buildLinhaChart(ranking) {
-  const labels = ranking.map(([l]) => l);
-  const data = ranking.map(([,v]) => v);
+function buildLinhaChart(labels, data) {
   const maxVal = Math.max(0, ...data);
   const { step, max: axisMax } = niceAxisConfig(maxVal, 5);
   const ctx = document.getElementById('chartLinhaRanking').getContext('2d');
@@ -785,19 +812,165 @@ function buildLinhaChart(ranking) {
   });
 }
 
-function renderLinhaDrill() {
-  const linha = document.getElementById('f-linha-drill').value;
-  const porDist = ULTIMO_POR_LINHA_DIST[linha] || {};
-  const totalLinha = Object.values(porDist).reduce((a,b) => a+b, 0);
-  const ranking = Object.entries(porDist).sort((a,b) => b[1]-a[1]);
+// Popula as opções do filtro de Linha (cascata a partir da Categoria) e do
+// filtro de Produto (cascata a partir de Categoria+Linha). As OPÇÕES vêm do
+// dado completo (não são afetadas por Período/Regional/Distribuidor -- só os
+// VALORES exibidos são), pra não ficar sumindo/aparecendo opção ao trocar
+// período. Sempre preserva a seleção atual, se ainda for válida.
+function popularFiltrosCascata() {
+  const cat = document.getElementById('f-categoria-linha').value;
 
-  document.getElementById('linhaDistToolbarTitle').textContent = 'Distribuidores em "' + linha + '"';
-  document.getElementById('linhaDistInfo').textContent = ranking.length + ' distribuidores';
+  const selLinha = document.getElementById('f-linha');
+  const linhaAtual = selLinha.value;
+  const linhasDisponiveis = new Map(); // linha -> valor total (p/ ordenar)
+  ITEM_PRODUTO_MENSAL.forEach(r => {
+    if (cat !== 'todas' && r.categoria !== cat) return;
+    linhasDisponiveis.set(r.linha, (linhasDisponiveis.get(r.linha) || 0) + r.valor);
+  });
+  const linhasOrdenadas = Array.from(linhasDisponiveis.entries()).sort((a,b) => b[1]-a[1]);
+  selLinha.innerHTML = '<option value="todas">Todas as linhas</option>' +
+    linhasOrdenadas.map(([l]) => `<option value="${l}">${l}</option>`).join('');
+  selLinha.value = linhasDisponiveis.has(linhaAtual) ? linhaAtual : 'todas';
 
-  const tbody = document.getElementById('linhaDistTbody');
-  tbody.innerHTML = ranking.map(([dcode, valor], idx) => {
+  const linha = selLinha.value;
+  const selProduto = document.getElementById('f-produto');
+  const produtoAtual = selProduto.value;
+  const produtosDisponiveis = new Map(); // cod_produto -> {produto, valor}
+  ITEM_PRODUTO_MENSAL.forEach(r => {
+    if (cat !== 'todas' && r.categoria !== cat) return;
+    if (linha !== 'todas' && r.linha !== linha) return;
+    if (!r.cod_produto) return;
+    const atual = produtosDisponiveis.get(r.cod_produto) || { produto: r.produto, valor: 0 };
+    atual.valor += r.valor;
+    produtosDisponiveis.set(r.cod_produto, atual);
+  });
+  const produtosOrdenados = Array.from(produtosDisponiveis.entries()).sort((a,b) => b[1].valor - a[1].valor);
+  selProduto.innerHTML = '<option value="todos">Todos os produtos</option>' +
+    produtosOrdenados.map(([cod, info]) => `<option value="${cod}">${cod} - ${info.produto}</option>`).join('');
+  selProduto.value = produtosDisponiveis.has(produtoAtual) ? produtoAtual : 'todos';
+}
+
+function renderLinhas() {
+  if (!ITEM_PRODUTO_MENSAL.length) return;
+  popularFiltrosCascata();
+
+  const cat = document.getElementById('f-categoria-linha').value;
+  const linha = document.getElementById('f-linha').value;
+  const produto = document.getElementById('f-produto').value;
+
+  // ---- filtra o dataset completo pelo recorte atual (periodo/regional/
+  // distribuidor + categoria/linha/produto) ----
+  const linhasRows = [];   // linhas que batem em categoria (e linha, se selecionada)
+  let totalRecorte = 0, totalNormal = 0, totalPromo = 0;
+
+  ITEM_PRODUTO_MENSAL.forEach(r => {
+    if (cat !== 'todas' && r.categoria !== cat) return;
+    if (linha !== 'todas' && r.linha !== linha) return;
+    if (produto !== 'todos' && r.cod_produto !== produto) return;
+    if (!passaFiltroDist(r.dcode)) return;
+    const frac = fracaoOverlapMes(r.mes - 1, inicioIso, fimIso);
+    if (frac <= 0) return;
+    const valor = r.valor * frac;
+    linhasRows.push({ ...r, valorFrac: valor });
+    totalRecorte += valor;
+    if (r.tipo === 'promocao') totalPromo += valor; else totalNormal += valor;
+  });
+
+  const periodoLabel = idxLabel(inicioIso) + ' a ' + idxLabel(fimIso) + '/' + CONFIG.ano;
+  const catLabel = cat === 'todas' ? 'Todas as categorias' : CAT_LABEL[cat];
+  const escopoLabel = [catLabel, linha !== 'todas' ? linha : null, produto !== 'todos' ? produto : null]
+    .filter(Boolean).join(' › ');
+
+  document.getElementById('linhaKpiTotalLabel').textContent = 'Total no período';
+  document.getElementById('linhaKpiTotal').textContent = fmtBRL(totalRecorte);
+  document.getElementById('linhaKpiTotalSub').textContent = escopoLabel + ' · ' + periodoLabel;
+  document.getElementById('linhaKpiNormal').textContent = totalRecorte ? (totalNormal/totalRecorte*100).toFixed(1)+'%' : '—';
+  document.getElementById('linhaKpiPromo').textContent = totalRecorte ? (totalPromo/totalRecorte*100).toFixed(1)+'%' : '—';
+
+  // ---- area de ranking principal: LINHAS (se nenhuma linha especifica
+  // selecionada) ou PRODUTOS dentro da linha (se uma linha foi escolhida) ----
+  if (linha === 'todas') {
+    document.getElementById('linhaRankingTitle').innerHTML =
+      `<span class="badge badge-total">Ranking</span> Linhas${cat !== 'todas' ? ' dentro de ' + catLabel : ' (todas as categorias)'}`;
+    document.getElementById('linhaRankingToolbarTitle').textContent = 'Ranking de linhas — valor e % do total';
+    document.getElementById('linhaRankingColLabel').textContent = 'Linha';
+
+    const porLinha = {};
+    linhasRows.forEach(r => {
+      const chave = cat === 'todas' ? `${r.linha} (${CAT_LABEL[r.categoria]})` : r.linha;
+      porLinha[chave] = (porLinha[chave] || 0) + r.valorFrac;
+    });
+    const ranking = Object.entries(porLinha).sort((a,b) => b[1]-a[1]);
+    buildLinhaChart(ranking.map(([l]) => l), ranking.map(([,v]) => v));
+
+    document.getElementById('linhaRankingInfo').textContent = ranking.length + ' linhas';
+    document.getElementById('linhaRankingTbody').innerHTML = ranking.map(([l, valor], idx) => {
+      const pct = totalRecorte ? (valor/totalRecorte*100) : 0;
+      return `<tr>
+        <td style="text-align:center;color:var(--cinza-texto);font-weight:700;">${idx+1}</td>
+        <td><strong>${l}</strong></td>
+        <td>${fmtBRL(valor)}</td>
+        <td><strong>${pct.toFixed(2)}%</strong></td>
+      </tr>`;
+    }).join('');
+
+    document.getElementById('produtosSectionTitle').style.display = 'none';
+    document.getElementById('produtosWrap').style.display = 'none';
+  } else {
+    document.getElementById('linhaRankingTitle').innerHTML =
+      `<span class="badge badge-total">Ranking</span> Produtos dentro de "${linha}"`;
+    document.getElementById('linhaRankingToolbarTitle').textContent = 'Ranking de produtos — valor e % da linha';
+    document.getElementById('linhaRankingColLabel').textContent = 'Produto';
+
+    const porProduto = {}; // cod_produto -> {produto, valor}
+    linhasRows.forEach(r => {
+      const key = r.cod_produto || '(sem código)';
+      if (!porProduto[key]) porProduto[key] = { produto: r.produto, valor: 0 };
+      porProduto[key].valor += r.valorFrac;
+    });
+    const ranking = Object.entries(porProduto).sort((a,b) => b[1].valor - a[1].valor);
+    buildLinhaChart(ranking.map(([cod,info]) => `${cod} - ${info.produto}`.slice(0,40)), ranking.map(([,info]) => info.valor));
+
+    document.getElementById('linhaRankingInfo').textContent = ranking.length + ' produtos';
+    document.getElementById('linhaRankingTbody').innerHTML = ranking.map(([cod, info], idx) => {
+      const pct = totalRecorte ? (info.valor/totalRecorte*100) : 0;
+      return `<tr>
+        <td style="text-align:center;color:var(--cinza-texto);font-weight:700;">${idx+1}</td>
+        <td><strong>${cod}</strong> - ${info.produto}</td>
+        <td>${fmtBRL(info.valor)}</td>
+        <td><strong>${pct.toFixed(2)}%</strong></td>
+      </tr>`;
+    }).join('');
+
+    // tabela extra de produtos (redundante com o ranking acima quando ja
+    // filtrado por linha, mas mantida visivel/separada por clareza quando
+    // um produto especifico tambem estiver selecionado)
+    document.getElementById('produtosSectionTitle').style.display = '';
+    document.getElementById('produtosWrap').style.display = '';
+    document.getElementById('produtosInfo').textContent = ranking.length + ' produtos';
+    document.getElementById('produtosTbody').innerHTML = ranking.map(([cod, info], idx) => {
+      const pct = totalRecorte ? (info.valor/totalRecorte*100) : 0;
+      return `<tr>
+        <td style="text-align:center;color:var(--cinza-texto);font-weight:700;">${idx+1}</td>
+        <td><strong>${cod}</strong></td>
+        <td>${info.produto}</td>
+        <td>${fmtBRL(info.valor)}</td>
+        <td><strong>${pct.toFixed(2)}%</strong></td>
+      </tr>`;
+    }).join('');
+  }
+
+  // ---- comparacao entre distribuidores, sempre no recorte atual completo ----
+  const porDist = {};
+  linhasRows.forEach(r => {
+    porDist[r.dcode] = (porDist[r.dcode] || 0) + r.valorFrac;
+  });
+  const rankingDist = Object.entries(porDist).sort((a,b) => b[1]-a[1]);
+  document.getElementById('linhaDistToolbarTitle').textContent = 'Distribuidores — ' + escopoLabel;
+  document.getElementById('linhaDistInfo').textContent = rankingDist.length + ' distribuidores';
+  document.getElementById('linhaDistTbody').innerHTML = rankingDist.map(([dcode, valor], idx) => {
     const info = DIST_MAP[dcode] || {};
-    const pct = totalLinha ? (valor/totalLinha*100) : 0;
+    const pct = totalRecorte ? (valor/totalRecorte*100) : 0;
     return `<tr>
       <td style="text-align:center;color:var(--cinza-texto);font-weight:700;">${idx+1}</td>
       <td><strong>${info.nome || dcode}</strong><br><span style="font-size:.7rem;color:var(--cinza-texto)">${dcode}</span></td>
@@ -806,69 +979,12 @@ function renderLinhaDrill() {
       <td><strong>${pct.toFixed(2)}%</strong></td>
     </tr>`;
   }).join('');
-}
-
-function renderLinhas() {
-  if (!ITEM_MENSAL.length) return;
-  const cat = document.getElementById('f-categoria-linha').value;
-
-  const porLinha = {};
-  const porLinhaDist = {};
-  let totalCategoria = 0, totalNormal = 0, totalPromo = 0;
-
-  ITEM_MENSAL.forEach(r => {
-    if (r.categoria !== cat) return;
-    if (!passaFiltroDist(r.dcode)) return;
-    const frac = fracaoOverlapMes(r.mes - 1, inicioIso, fimIso);
-    if (frac <= 0) return;
-    const valor = r.valor * frac;
-
-    porLinha[r.linha] = (porLinha[r.linha] || 0) + valor;
-    if (!porLinhaDist[r.linha]) porLinhaDist[r.linha] = {};
-    porLinhaDist[r.linha][r.dcode] = (porLinhaDist[r.linha][r.dcode] || 0) + valor;
-
-    totalCategoria += valor;
-    if (r.tipo === 'promocao') totalPromo += valor; else totalNormal += valor;
-  });
-  ULTIMO_POR_LINHA_DIST = porLinhaDist;
-
-  const catLabel = { tratamento: 'Tratamento', coloracao: 'Coloração', ohmy: 'OhMy!' }[cat];
-  const periodoLabel = idxLabel(inicioIso) + ' a ' + idxLabel(fimIso) + '/' + CONFIG.ano;
-
-  document.getElementById('linhaRankingTitle').innerHTML =
-    `<span class="badge badge-total">Ranking</span> Linhas dentro de ${catLabel}`;
-  document.getElementById('linhaKpiTotal').textContent = fmtBRL(totalCategoria);
-  document.getElementById('linhaKpiTotalSub').textContent = catLabel + ' · ' + periodoLabel;
-  document.getElementById('linhaKpiNormal').textContent = totalCategoria ? (totalNormal/totalCategoria*100).toFixed(1)+'%' : '—';
-  document.getElementById('linhaKpiPromo').textContent = totalCategoria ? (totalPromo/totalCategoria*100).toFixed(1)+'%' : '—';
-
-  const ranking = Object.entries(porLinha).sort((a,b) => b[1]-a[1]);
-  buildLinhaChart(ranking);
-
-  document.getElementById('linhaRankingInfo').textContent = ranking.length + ' linhas';
-  const tbody = document.getElementById('linhaRankingTbody');
-  tbody.innerHTML = ranking.map(([linha, valor], idx) => {
-    const pct = totalCategoria ? (valor/totalCategoria*100) : 0;
-    return `<tr>
-      <td style="text-align:center;color:var(--cinza-texto);font-weight:700;">${idx+1}</td>
-      <td><strong>${linha}</strong></td>
-      <td>${fmtBRL(valor)}</td>
-      <td><strong>${pct.toFixed(2)}%</strong></td>
-    </tr>`;
-  }).join('');
-
-  // popula (preservando selecao atual, se ainda existir) o seletor de linha
-  const sel = document.getElementById('f-linha-drill');
-  const linhaAtual = sel.value;
-  sel.innerHTML = ranking.map(([linha]) => `<option value="${linha}">${linha}</option>`).join('');
-  if (ranking.some(([l]) => l === linhaAtual)) sel.value = linhaAtual;
-  renderLinhaDrill();
 
   const [openS, openE] = monthRangeIso(CONFIG.mesAbertoIdx);
   const includesOpen = inicioIso <= openE && fimIso >= openS;
   document.getElementById('linhaFootnote').textContent = includesOpen
     ? 'Mês em aberto: este detalhamento reflete apenas o valor já faturado. A parcela em pedidos ainda não identifica o produto — o total pode ficar levemente abaixo do Realizado mostrado na Visão Geral até o fechamento do mês.'
-    : 'Metodologia: para meses encerrados, o valor de cada linha é obtido rateando o Realizado oficial da categoria (FM-02) proporcionalmente entre os produtos que apareceram nas notas fiscais daquele mês — o total sempre bate com o Realizado oficial.';
+    : 'Metodologia: para meses encerrados, o valor de cada linha/produto é obtido rateando o Realizado oficial da categoria (FM-02) proporcionalmente entre os produtos que apareceram nas notas fiscais daquele mês — o total sempre bate com o Realizado oficial.';
 }
 
 async function init() {
@@ -877,7 +993,7 @@ async function init() {
     await carregarConfig();
     await carregarDistribuidores();
     await carregarMensal();
-    await carregarItemMensal();
+    await carregarItemProdutoMensal();
 
     // popula filtro de distribuidor
     const sel = document.getElementById('f-distribuidor');
@@ -915,7 +1031,8 @@ async function init() {
     document.getElementById('f-regional').addEventListener('change', aplicarFiltro);
     document.getElementById('f-distribuidor').addEventListener('change', aplicarFiltro);
     document.getElementById('f-categoria-linha').addEventListener('change', renderLinhas);
-    document.getElementById('f-linha-drill').addEventListener('change', renderLinhaDrill);
+    document.getElementById('f-linha').addEventListener('change', renderLinhas);
+    document.getElementById('f-produto').addEventListener('change', renderLinhas);
     window.addEventListener('resize', () => Object.values(charts).forEach(c => c.resize()));
 
     // navegacao por abas -- "Visao Geral" fica identica a hoje; a nova aba
