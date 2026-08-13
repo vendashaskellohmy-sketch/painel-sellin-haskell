@@ -402,11 +402,18 @@ async function carregarConfig() {
 async function carregarDistribuidores() {
   const rows = await fetchAll(() => sb.from('sellin_distribuidores').select('*').order('dcode', { ascending: true }));
   rows.forEach(r => DIST_MAP[r.dcode] = r);
-  // Nao filtra mais por status "Ativo" -- todos os distribuidores cadastrados
-  // entram no filtro e nos calculos (Meta/Realizado de cada um refletem
-  // exatamente o que esta nas planilhas, mes a mes; quem nao vendeu num mes
-  // aparece com Realizado zero naturalmente).
-  DIST_LIST = rows.slice().sort((a,b) => a.nome.localeCompare(b.nome));
+  // DIST_MAP fica com TODOS os distribuidores (ativos e desligados) -- é
+  // usado nos cálculos e na exibição de nome/regional em tabelas, e
+  // precisa incluir quem já foi desligado mas teve faturamento real em
+  // 2026 (ex.: Perffil PB, Pettra, Prisma), senão esse histórico
+  // desapareceria dos totais.
+  //
+  // DIST_LIST, por outro lado, alimenta só o DROPDOWN de seleção manual de
+  // distribuidor -- esse sim deve mostrar apenas quem está ativo em 2026,
+  // para não poluir a lista com distribuidores descontinuados que ninguém
+  // vai querer selecionar individualmente.
+  DIST_LIST = rows.filter(r => (r.status || '').toUpperCase() === 'ATIVO')
+                  .sort((a,b) => a.nome.localeCompare(b.nome));
 }
 
 async function carregarMensal() {
@@ -489,6 +496,111 @@ async function carregarItemProdutoMensal() {
       .order('cod_produto', { ascending: true })
       .order('mes', { ascending: true })
   );
+}
+
+// Histórico de anos anteriores (linha de comparação tracejada no gráfico
+// "Faturamento x Meta — Total"). Granularidade mensal só -- prorateamos
+// igualmente pelos dias do mês em memória, já que não há detalhe diário
+// para anos encerrados. HISTORICO_POR_ANO[ano][categoria] = {meta:[12], real:[12]}
+let HISTORICO_POR_ANO = {};
+async function carregarHistorico() {
+  let rows = [];
+  try {
+    rows = await fetchAll(() => sb.from('sellin_realizado_historico').select('*'));
+  } catch (e) {
+    console.warn('sellin_realizado_historico não encontrada ou vazia -- sem linha de comparação com anos anteriores.', e);
+    return;
+  }
+  rows.forEach(r => {
+    if (!HISTORICO_POR_ANO[r.ano]) HISTORICO_POR_ANO[r.ano] = {};
+    if (!HISTORICO_POR_ANO[r.ano][r.categoria]) {
+      HISTORICO_POR_ANO[r.ano][r.categoria] = { meta: Array(12).fill(0), real: Array(12).fill(0) };
+    }
+    HISTORICO_POR_ANO[r.ano][r.categoria].meta[r.mes - 1] = r.meta;
+    HISTORICO_POR_ANO[r.ano][r.categoria].real[r.mes - 1] = r.realizado;
+  });
+  // agrega um "total" sintetico (soma das 3 categorias) por ano, pra usar
+  // no grafico consolidado
+  Object.keys(HISTORICO_POR_ANO).forEach(ano => {
+    const porAno = HISTORICO_POR_ANO[ano];
+    const total = { meta: Array(12).fill(0), real: Array(12).fill(0) };
+    CATS.forEach(cat => {
+      if (!porAno[cat]) return;
+      for (let mi = 0; mi < 12; mi++) {
+        total.meta[mi] += porAno[cat].meta[mi];
+        total.real[mi] += porAno[cat].real[mi];
+      }
+    });
+    porAno.total = total;
+  });
+}
+
+// Constroi, para o mesmo conjunto de dias (labels) do periodo selecionado em
+// 2026, a serie acumulada equivalente do ano anterior -- mesmo mes/dia,
+// prorateando o total mensal do histórico igualmente pelos dias daquele mês
+// (não há detalhe diário para anos já encerrados, então essa é a melhor
+// aproximação disponível como linha de referência).
+function serieComparativoAnoAnterior(labels, categoria) {
+  const anoAnterior = CONFIG.ano - 1;
+  const hist = HISTORICO_POR_ANO[anoAnterior];
+  if (!hist || !hist[categoria]) return null;
+  const realMensal = hist[categoria].real;
+  let acumulado = 0;
+  return labels.map(iso => {
+    const d = new Date(iso + 'T00:00:00');
+    const mes = d.getMonth();
+    const dias = new Date(anoAnterior, mes + 1, 0).getDate();
+    acumulado += (realMensal[mes] || 0) / dias;
+    return Math.round(acumulado * 100) / 100;
+  });
+}
+
+// Histórico DIÁRIO por distribuidor/regional (evolução do carregarHistorico
+// acima -- não o substitui, só complementa). Dá a linha de comparação
+// dinamismo: ela se ajusta ao filtro de Regional e de Distribuidor.
+// DIARIO_HISTORICO = [{ano, dcode, grupo, categoria, dia, valor}, ...]
+let DIARIO_HISTORICO = [];
+async function carregarHistoricoDiario() {
+  try {
+    DIARIO_HISTORICO = await fetchAll(() => sb.from('sellin_diario_historico').select('*'));
+  } catch (e) {
+    console.warn('sellin_diario_historico não encontrada -- comparativo com ano anterior sem dinamismo por Regional/Distribuidor.', e);
+    DIARIO_HISTORICO = [];
+  }
+}
+
+// Versão dinâmica do comparativo com o ano anterior: usa a forma diária
+// real (sellin_diario_historico) e respeita o filtro de Regional/
+// Distribuidor selecionado. Se o distribuidor filtrado não tiver NENHUM
+// dado no ano anterior (começou as atividades neste ano), retorna null e a
+// linha simplesmente não aparece. Se a tabela diária ainda não tiver sido
+// enviada (só a mensal antiga), cai de volta para serieComparativoAnoAnterior.
+function serieComparativoAnoAnteriorDinamica(labels) {
+  if (!DIARIO_HISTORICO.length) {
+    return serieComparativoAnoAnterior(labels, 'total');
+  }
+  const anoAnterior = CONFIG.ano - 1;
+
+  let linhas;
+  if (distribuidor !== 'todos') {
+    linhas = DIARIO_HISTORICO.filter(r => r.ano === anoAnterior && r.dcode === distribuidor);
+    if (linhas.length === 0) return null; // distribuidor nao existia no ano anterior
+  } else if (regional !== 'todas') {
+    linhas = DIARIO_HISTORICO.filter(r => r.ano === anoAnterior && r.grupo === regional);
+  } else {
+    linhas = DIARIO_HISTORICO.filter(r => r.ano === anoAnterior);
+  }
+
+  const porDia = {};
+  linhas.forEach(r => { porDia[r.dia] = (porDia[r.dia] || 0) + r.valor; });
+
+  let acumulado = 0;
+  return labels.map(iso => {
+    const d = new Date(iso + 'T00:00:00');
+    const isoAnterior = `${anoAnterior}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    acumulado += (porDia[isoAnterior] || 0);
+    return Math.round(acumulado * 100) / 100;
+  });
 }
 
 // ==========================================================================
@@ -593,25 +705,30 @@ function idxLabel(iso) {
   return String(d.getDate()).padStart(2,'0') + '/' + String(d.getMonth()+1).padStart(2,'0');
 }
 
-function buildChart(canvasId, labels, real, meta) {
+function buildChart(canvasId, labels, real, meta, comparativo) {
   const realData = cumulative(real);
   const metaData = cumulative(meta);
-  const maxVal = Math.max(0, ...realData, ...metaData);
+  const maxVal = Math.max(0, ...realData, ...metaData, ...(comparativo || []));
   const { step, max: axisMax } = niceAxisConfig(maxVal, 5);
 
   const ctx = document.getElementById(canvasId).getContext('2d');
   if (charts[canvasId]) charts[canvasId].destroy();
+  const datasets = [
+    { label: 'Realizado', data: realData, order: 2, borderColor: MAIN_COLORS.real,
+      backgroundColor: hex2rgba(MAIN_COLORS.real, 0.35), fill: 'origin', pointRadius: 0, borderWidth: 2, tension: 0.15 },
+    { label: 'Meta', data: metaData, order: 1, borderColor: MAIN_COLORS.meta,
+      backgroundColor: hex2rgba(MAIN_COLORS.meta, 0.35), fill: '-1', pointRadius: 0, borderWidth: 2, tension: 0.15 },
+  ];
+  if (comparativo) {
+    datasets.push({
+      label: 'Realizado ' + (CONFIG.ano - 1), data: comparativo, order: 3,
+      borderColor: '#6c757d', backgroundColor: 'transparent', borderDash: [6, 4],
+      pointRadius: 0, borderWidth: 1.5, tension: 0.15, fill: false,
+    });
+  }
   charts[canvasId] = new Chart(ctx, {
     type: 'line',
-    data: {
-      labels: labels.map(idxLabel),
-      datasets: [
-        { label: 'Realizado', data: realData, order: 2, borderColor: MAIN_COLORS.real,
-          backgroundColor: hex2rgba(MAIN_COLORS.real, 0.35), fill: 'origin', pointRadius: 0, borderWidth: 2, tension: 0.15 },
-        { label: 'Meta', data: metaData, order: 1, borderColor: MAIN_COLORS.meta,
-          backgroundColor: hex2rgba(MAIN_COLORS.meta, 0.35), fill: '-1', pointRadius: 0, borderWidth: 2, tension: 0.15 },
-      ]
-    },
+    data: { labels: labels.map(idxLabel), datasets },
     options: {
       responsive: true, maintainAspectRatio: false,
       interaction: { mode: 'index', intersect: false },
@@ -653,7 +770,7 @@ async function renderTudo() {
     const rows = await obterSerieDiaria();
     const { labels, series } = construirSeriesPorDia(rows);
 
-    buildChart('chartTotal', labels, series.total.real, series.total.meta);
+    buildChart('chartTotal', labels, series.total.real, series.total.meta, serieComparativoAnoAnteriorDinamica(labels));
     buildChart('chartTrat', labels, series.tratamento.real, series.tratamento.meta);
     buildChart('chartCol', labels, series.coloracao.real, series.coloracao.meta);
     buildChart('chartOhmy', labels, series.ohmy.real, series.ohmy.meta);
@@ -994,6 +1111,8 @@ async function init() {
     await carregarDistribuidores();
     await carregarMensal();
     await carregarItemProdutoMensal();
+    await carregarHistorico();
+    await carregarHistoricoDiario();
 
     // popula filtro de distribuidor
     const sel = document.getElementById('f-distribuidor');
