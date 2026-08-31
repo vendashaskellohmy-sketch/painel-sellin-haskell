@@ -159,9 +159,9 @@ tr:last-child td { border-bottom: none; }
     <div class="filter-hint" id="filterHint"></div>
   </div>
 
-  <div id="tab-panel-geral" class="tab-panel">
-
   <div class="month-tabs" id="monthTabs"></div>
+
+  <div id="tab-panel-geral" class="tab-panel">
 
   <div class="kpi-row">
     <div class="kpi-card meta">
@@ -258,7 +258,29 @@ tr:last-child td { border-bottom: none; }
         <label>Produto (SKU)</label>
         <select id="f-produto" style="min-width:260px;"><option value="todos">Todos os produtos</option></select>
       </div>
+      <div class="filter-group">
+        <label>Tipo de Promoção</label>
+        <select id="f-tipo-promocao" style="min-width:240px;"><option value="todos">Todas / nenhuma</option></select>
+      </div>
       <div class="filter-hint">Usa também os filtros de Período, Regional e Distribuidor da Visão Geral, acima.</div>
+    </div>
+
+    <div class="chart-card" id="tipoPromocaoInfoCard" style="display:none;margin-bottom:14px;background:#fff8ec;border:1px solid #f0dfb8;">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap;">
+        <div>
+          <div style="font-size:.7rem;text-transform:uppercase;letter-spacing:.5px;color:#a67c1f;font-weight:700;margin-bottom:4px;">
+            Calendário de Promoções 2026
+          </div>
+          <div id="tipoPromocaoMecanica" style="font-size:.85rem;color:var(--texto);"></div>
+        </div>
+        <div style="white-space:nowrap;font-size:.8rem;color:var(--cinza-texto);">
+          <strong>Período Venda Indústria:</strong> <span id="tipoPromocaoPeriodo"></span>
+        </div>
+      </div>
+      <div id="tipoPromocaoSemLinha" style="display:none;margin-top:8px;font-size:.78rem;color:#a67c1f;font-style:italic;">
+        Esta ação não tem uma linha de produto específica associada (é uma campanha de material/verba) —
+        os números abaixo não vão refletir nenhuma venda filtrada.
+      </div>
     </div>
 
     <div class="kpi-row kpi-row-3">
@@ -285,13 +307,14 @@ tr:last-child td { border-bottom: none; }
     </div>
 
     <div class="data-table-wrap" style="margin-top:14px;">
-      <div class="table-toolbar">
+      <div class="table-toolbar" id="linhaRankingToggle" style="cursor:pointer;user-select:none;">
         <h3 id="linhaRankingToolbarTitle">Ranking — valor e %</h3>
         <span class="table-info" id="linhaRankingInfo"></span>
+        <span id="linhaRankingChevron" style="margin-left:10px;display:inline-block;transition:transform .2s;font-size:.8rem;color:var(--cinza-texto);">▾</span>
       </div>
-      <div class="scroll-x">
+      <div class="scroll-x" id="linhaRankingTableWrap" style="display:none;">
         <table>
-          <thead><tr><th>#</th><th id="linhaRankingColLabel">Linha</th><th>Valor</th><th>%</th></tr></thead>
+          <thead><tr><th>#</th><th id="linhaRankingColLabel">Linha</th><th>Normal</th><th>Promoção</th><th>Valor</th><th>%</th></tr></thead>
           <tbody id="linhaRankingTbody"></tbody>
         </table>
       </div>
@@ -307,14 +330,14 @@ tr:last-child td { border-bottom: none; }
       </div>
       <div class="scroll-x">
         <table>
-          <thead><tr><th>#</th><th>SKU</th><th>Produto</th><th>Valor</th><th>% da linha</th></tr></thead>
+          <thead><tr><th>#</th><th>SKU</th><th>Produto</th><th>Normal</th><th>Promoção</th><th>Valor</th><th>% da linha</th></tr></thead>
           <tbody id="produtosTbody"></tbody>
         </table>
       </div>
     </div>
 
     <div class="section-title">
-      <span class="badge badge-total">Comparação</span> Distribuidores no recorte selecionado
+      <span class="badge badge-total">Comparação</span> Distribuidores no recorte selecionado — venda Normal x Promoção
     </div>
     <div class="data-table-wrap">
       <div class="table-toolbar">
@@ -323,10 +346,21 @@ tr:last-child td { border-bottom: none; }
       </div>
       <div class="scroll-x">
         <table>
-          <thead><tr><th>#</th><th>Distribuidor</th><th>Regional</th><th>Valor</th><th>% do recorte</th></tr></thead>
+          <thead>
+            <tr>
+              <th>#</th><th>Distribuidor</th><th>Regional</th>
+              <th>Venda Normal</th><th>Venda Promoção</th><th>Venda Total</th><th>% Promoção</th>
+            </tr>
+          </thead>
           <tbody id="linhaDistTbody"></tbody>
         </table>
       </div>
+    </div>
+    <div class="footnote">
+      "Venda Normal" é o total faturado em preço normal por esse distribuidor no período inteiro selecionado (não muda
+      com o filtro de Categoria/Linha/Produto/Tipo de Promoção). "Venda Promoção" é o valor promocional só dentro do
+      recorte atual (ex.: só da promoção selecionada acima). "% Promoção" compara os dois: quanto maior, mais essa
+      promoção específica pesou frente ao volume normal do distribuidor.
     </div>
 
     <div class="footnote" id="linhaFootnote"></div>
@@ -897,6 +931,101 @@ async function aplicarFiltro() {
 // ==========================================================================
 const CAT_LABEL = { tratamento: 'Tratamento', coloracao: 'Coloração', ohmy: 'OhMy!' };
 
+// Calendário de Promoções Aprovadas 2026 (Calendario_Promoções_2026.xlsx, aba
+// "Realizadas-Planejadas") -- só as colunas Tipo / Mecânica / Período Venda
+// Indústria, conforme pedido. `linhas` é a ligação entre o nome comercial da
+// promoção e as linhas que o painel já reconhece (interpretada a partir do
+// texto da Mecânica e confirmada com o usuário antes de implementar) -- uma
+// lista vazia significa que a promoção não tem linha específica associada
+// (ex.: ação de material/merchandising), então só mostra a informação, sem
+// filtrar nenhuma venda.
+const TIPO_PROMOCAO_CALENDARIO = {
+  'Promopacks Haskell 300 e 500ml': {
+    mecanica: 'Desconto nos packs das linhas: Cavalo Forte, Mandioca e Murumuru.',
+    periodo: 'Janeiro', linhas: ['Cavalo Forte', 'Mandioca', 'Murumuru'],
+    itens: ['1.014.025', '1.014.012', '1.014.016', '1.014.010', '1.014.011', '1.014.029'],
+  },
+  'Se Curve Haskell': {
+    mecanica: 'Desconto nos itens: Creme de Pentear, Creme Finalizador de Crespos, Goma Texturizadora, Modelador de Cachos e Curva e Cola de 500g.',
+    periodo: 'Janeiro', linhas: ['Se Curve'],
+    itens: ['1.004.122', '1.004.110', '1.004.108', '1.004.109', '1.004.117'],
+  },
+  'Hair Power Oh My!': {
+    mecanica: 'Desconto em todos os itens da linha.',
+    periodo: 'Janeiro', linhas: ['Hair Power'], itens: [],
+  },
+  'Coloração Tubo/Oxs': {
+    mecanica: '20% de desconto no Tubo. Condição: para cada 2 tubos faturados, será necessário ao menos 1 ox faturada.',
+    periodo: 'Janeiro', linhas: ['Tubo', 'Pó e OX'], itens: [],
+  },
+  'Kit Color Pratic': {
+    mecanica: 'Desconto de 10 a 15%.',
+    periodo: 'Março', linhas: ['Prático'], itens: [],
+  },
+  'Máscaras de 900g': {
+    mecanica: 'Desconto nas máscaras de 900g das linhas: Cavalo Forte, Mandioca, Murumuru, Quina Rosa e Tutano Vegetal.',
+    periodo: 'Abril', linhas: ['Cavalo Forte', 'Mandioca', 'Murumuru', 'Quina Rosa', 'Tutano Vegetal'],
+    itens: ['1.003.147', '1.003.145', '1.003.151', '1.003.163', '1.003.165'],
+  },
+  'Tonalizantes': {
+    mecanica: 'Desconto de 10 a 15%.',
+    periodo: 'Maio', linhas: ['Tonalizante'], itens: [],
+  },
+  'Infusão de óleos': {
+    mecanica: 'Infusão de óleos.',
+    periodo: 'Julho', linhas: ['Infusão de Óleos'], itens: [],
+  },
+  'Pó Descolorante': {
+    mecanica: 'Rebaixa de preço para melhor performa.',
+    periodo: 'Janeiro/2025 a indeterminado', linhas: ['Pó e OX'],
+    itens: ['1.010.004'],
+  },
+  'OXs 800ml': {
+    mecanica: 'Rebaixa de preço para melhor performa.',
+    periodo: 'Janeiro/2025 a indeterminado', linhas: ['Pó e OX'],
+    itens: ['1.009.015', '1.009.017', '1.009.018'],
+  },
+  'Doce de Leite': {
+    mecanica: 'Bonificação de 10% no valor comprado em 2025.',
+    periodo: 'Janeiro/2026 a indeterminado', linhas: ['Doce de Leite Viçosa'], itens: [],
+  },
+  'Cavalo Forte SP': {
+    mecanica: 'Desconto 20% ao consumidor, sendo 10% indústria e 10% distribuidor. Reembolso mediante BI.',
+    periodo: 'Reembolso', linhas: ['Cavalo Forte'], itens: [],
+  },
+  'Acidificante - apenas máscara': {
+    mecanica: 'Desconto 20% ao consumidor, sendo 10% indústria e 10% distribuidor. Reembolso mediante BI.',
+    periodo: 'Reembolso', linhas: ['Acidificante'],
+    itens: ['1.003.190'],
+  },
+  'Se Curve - Toda a linha': {
+    mecanica: 'Desconto 20% ao consumidor, sendo 10% indústria e 10% distribuidor.',
+    periodo: 'Agosto', linhas: ['Se Curve'], itens: [],
+  },
+  'Lançamento Setembro': {
+    mecanica: '5% de verba MD sobre o sell in de agosto será transformado em material para promover os lançamentos de setembro.',
+    periodo: 'Setembro', linhas: [], itens: [],
+  },
+  'Máscara refil 200gr': {
+    mecanica: 'Definir custo de máscara refil infusão e bananeira e vender como MD para os distribuidores. (Produto ainda não existe no catálogo -- mostrando a linha toda enquanto isso.)',
+    periodo: 'Setembro', linhas: ['Infusão de Óleos', 'Bananeira Pós-química'], itens: [],
+  },
+  'Black Friday': {
+    mecanica: 'Desconto de 40% nas máscaras Murumuru e Mandioca (2) e Quina Rosa e Tutano (1), sendo 20% indústria e 20% distribuidor. (Mecânica não especifica a gramatura -- considerando todas as máscaras dessas linhas.)',
+    periodo: 'Outubro', linhas: ['Murumuru', 'Mandioca', 'Quina Rosa', 'Tutano Vegetal'],
+    itens: [
+      '1.003.144', '1.003.014', '1.003.145',   // Mandioca 300/500/900
+      '1.003.150', '1.003.116', '1.003.151',   // Murumuru 300/500/900
+      '1.003.162', '1.003.026', '1.003.163',   // Quina Rosa 300/500/900
+      '1.003.164', '1.003.011', '1.003.165',   // Tutano Vegetal 300/500/900
+    ],
+  },
+  'SOS Verão': {
+    mecanica: 'Sell in - Desconto 30% ao consumidor, sendo 15% indústria (sell in) e 15% distribuidor.',
+    periodo: 'Agosto', linhas: ['S.O.S Verão'], itens: [],
+  },
+};
+
 function fracaoOverlapMes(mi, inicio, fim) {
   const [ms, me] = monthRangeIso(mi);
   const ovS = ms > inicio ? ms : inicio;
@@ -906,24 +1035,31 @@ function fracaoOverlapMes(mi, inicio, fim) {
   return (dayDiff(ovS, ovE) + 1) / diasMes;
 }
 
-function buildLinhaChart(labels, data) {
-  const maxVal = Math.max(0, ...data);
+function buildLinhaChart(labels, normalData, promoData) {
+  const totals = labels.map((_, i) => normalData[i] + promoData[i]);
+  const maxVal = Math.max(0, ...totals);
   const { step, max: axisMax } = niceAxisConfig(maxVal, 5);
   const ctx = document.getElementById('chartLinhaRanking').getContext('2d');
   if (charts['chartLinhaRanking']) charts['chartLinhaRanking'].destroy();
   charts['chartLinhaRanking'] = new Chart(ctx, {
     type: 'bar',
-    data: { labels, datasets: [{ data, backgroundColor: MAIN_COLORS.real, borderRadius: 4, maxBarThickness: 26 }] },
+    data: {
+      labels,
+      datasets: [
+        { label: 'Normal', data: normalData, backgroundColor: MAIN_COLORS.real, borderRadius: 4, maxBarThickness: 26, stack: 's' },
+        { label: 'Promoção', data: promoData, backgroundColor: '#d9a441', borderRadius: 4, maxBarThickness: 26, stack: 's' },
+      ]
+    },
     options: {
       indexAxis: 'y',
       responsive: true, maintainAspectRatio: false,
       plugins: {
-        legend: { display: false },
-        tooltip: { callbacks: { label: (c) => fmtBRL(c.parsed.x) } }
+        legend: { position: 'top', labels: { boxWidth: 10, usePointStyle: true, pointStyle: 'circle', font: { size: 11 } } },
+        tooltip: { callbacks: { label: (c) => c.dataset.label + ': ' + fmtBRL(c.parsed.x) } }
       },
       scales: {
-        x: { beginAtZero: true, min: 0, max: axisMax, ticks: { stepSize: step, callback: (v) => fmtAxisTick(v, axisMax) }, grid: { color: '#f1f3f5' } },
-        y: { grid: { display: false }, ticks: { font: { size: 11 } } }
+        x: { stacked: true, beginAtZero: true, min: 0, max: axisMax, ticks: { stepSize: step, callback: (v) => fmtAxisTick(v, axisMax) }, grid: { color: '#f1f3f5' } },
+        y: { stacked: true, grid: { display: false }, ticks: { font: { size: 11 } } }
       }
     }
   });
@@ -974,16 +1110,41 @@ function renderLinhas() {
   const cat = document.getElementById('f-categoria-linha').value;
   const linha = document.getElementById('f-linha').value;
   const produto = document.getElementById('f-produto').value;
+  const tipoPromo = document.getElementById('f-tipo-promocao').value;
+
+  // ---- card informativo do Calendário de Promoções 2026 ----
+  const infoCard = document.getElementById('tipoPromocaoInfoCard');
+  let linhasDaPromocao = null;  // null = filtro nao ativo
+  let itensDaPromocao = null;   // lista de cod_produto especificos (se a promocao for so alguns itens)
+  if (tipoPromo !== 'todos') {
+    const promo = TIPO_PROMOCAO_CALENDARIO[tipoPromo];
+    linhasDaPromocao = promo.linhas;
+    itensDaPromocao = (promo.itens && promo.itens.length) ? promo.itens : null;
+    document.getElementById('tipoPromocaoMecanica').textContent = promo.mecanica;
+    document.getElementById('tipoPromocaoPeriodo').textContent = promo.periodo;
+    document.getElementById('tipoPromocaoSemLinha').style.display = promo.linhas.length ? 'none' : '';
+    infoCard.style.display = '';
+  } else {
+    infoCard.style.display = 'none';
+  }
 
   // ---- filtra o dataset completo pelo recorte atual (periodo/regional/
-  // distribuidor + categoria/linha/produto) ----
+  // distribuidor + categoria/linha/produto, ou Tipo de Promoção) ----
   const linhasRows = [];   // linhas que batem em categoria (e linha, se selecionada)
   let totalRecorte = 0, totalNormal = 0, totalPromo = 0;
 
   ITEM_PRODUTO_MENSAL.forEach(r => {
     if (cat !== 'todas' && r.categoria !== cat) return;
-    if (linha !== 'todas' && r.linha !== linha) return;
-    if (produto !== 'todos' && r.cod_produto !== produto) return;
+    if (linhasDaPromocao !== null) {
+      if (itensDaPromocao !== null) {
+        if (!itensDaPromocao.includes(r.cod_produto)) return;
+      } else {
+        if (!linhasDaPromocao.includes(r.linha)) return;
+      }
+    } else {
+      if (linha !== 'todas' && r.linha !== linha) return;
+      if (produto !== 'todos' && r.cod_produto !== produto) return;
+    }
     if (!passaFiltroDist(r.dcode)) return;
     const frac = fracaoOverlapMes(r.mes - 1, inicioIso, fimIso);
     if (frac <= 0) return;
@@ -995,8 +1156,9 @@ function renderLinhas() {
 
   const periodoLabel = idxLabel(inicioIso) + ' a ' + idxLabel(fimIso) + '/' + CONFIG.ano;
   const catLabel = cat === 'todas' ? 'Todas as categorias' : CAT_LABEL[cat];
-  const escopoLabel = [catLabel, linha !== 'todas' ? linha : null, produto !== 'todos' ? produto : null]
-    .filter(Boolean).join(' › ');
+  const escopoLabel = linhasDaPromocao !== null
+    ? [catLabel, 'Promoção: ' + tipoPromo].filter(Boolean).join(' › ')
+    : [catLabel, linha !== 'todas' ? linha : null, produto !== 'todos' ? produto : null].filter(Boolean).join(' › ');
 
   document.getElementById('linhaKpiTotalLabel').textContent = 'Total no período';
   document.getElementById('linhaKpiTotal').textContent = fmtBRL(totalRecorte);
@@ -1006,27 +1168,34 @@ function renderLinhas() {
 
   // ---- area de ranking principal: LINHAS (se nenhuma linha especifica
   // selecionada) ou PRODUTOS dentro da linha (se uma linha foi escolhida) ----
-  if (linha === 'todas') {
+  const agruparPorItem = (linha !== 'todas') || (linhasDaPromocao !== null);
+  if (!agruparPorItem) {
     document.getElementById('linhaRankingTitle').innerHTML =
       `<span class="badge badge-total">Ranking</span> Linhas${cat !== 'todas' ? ' dentro de ' + catLabel : ' (todas as categorias)'}`;
     document.getElementById('linhaRankingToolbarTitle').textContent = 'Ranking de linhas — valor e % do total';
     document.getElementById('linhaRankingColLabel').textContent = 'Linha';
 
-    const porLinha = {};
+    const porLinha = {}; // chave -> {normal, promocao}
     linhasRows.forEach(r => {
       const chave = cat === 'todas' ? `${r.linha} (${CAT_LABEL[r.categoria]})` : r.linha;
-      porLinha[chave] = (porLinha[chave] || 0) + r.valorFrac;
+      if (!porLinha[chave]) porLinha[chave] = { normal: 0, promocao: 0 };
+      if (r.tipo === 'promocao') porLinha[chave].promocao += r.valorFrac;
+      else porLinha[chave].normal += r.valorFrac;
     });
-    const ranking = Object.entries(porLinha).sort((a,b) => b[1]-a[1]);
-    buildLinhaChart(ranking.map(([l]) => l), ranking.map(([,v]) => v));
+    const ranking = Object.entries(porLinha)
+      .map(([l, v]) => ({ l, ...v, total: v.normal + v.promocao }))
+      .sort((a, b) => b.total - a.total);
+    buildLinhaChart(ranking.map(r => r.l), ranking.map(r => r.normal), ranking.map(r => r.promocao));
 
     document.getElementById('linhaRankingInfo').textContent = ranking.length + ' linhas';
-    document.getElementById('linhaRankingTbody').innerHTML = ranking.map(([l, valor], idx) => {
-      const pct = totalRecorte ? (valor/totalRecorte*100) : 0;
+    document.getElementById('linhaRankingTbody').innerHTML = ranking.map((r, idx) => {
+      const pct = totalRecorte ? (r.total/totalRecorte*100) : 0;
       return `<tr>
         <td style="text-align:center;color:var(--cinza-texto);font-weight:700;">${idx+1}</td>
-        <td><strong>${l}</strong></td>
-        <td>${fmtBRL(valor)}</td>
+        <td><strong>${r.l}</strong></td>
+        <td>${fmtBRL(r.normal)}</td>
+        <td>${fmtBRL(r.promocao)}</td>
+        <td>${fmtBRL(r.total)}</td>
         <td><strong>${pct.toFixed(2)}%</strong></td>
       </tr>`;
     }).join('');
@@ -1034,66 +1203,102 @@ function renderLinhas() {
     document.getElementById('produtosSectionTitle').style.display = 'none';
     document.getElementById('produtosWrap').style.display = 'none';
   } else {
+    const tituloItens = linhasDaPromocao !== null ? `Itens da promoção "${tipoPromo}"` : `Produtos dentro de "${linha}"`;
     document.getElementById('linhaRankingTitle').innerHTML =
-      `<span class="badge badge-total">Ranking</span> Produtos dentro de "${linha}"`;
-    document.getElementById('linhaRankingToolbarTitle').textContent = 'Ranking de produtos — valor e % da linha';
+      `<span class="badge badge-total">Ranking</span> ${tituloItens}`;
+    document.getElementById('linhaRankingToolbarTitle').textContent = 'Ranking de produtos — valor e % do recorte';
     document.getElementById('linhaRankingColLabel').textContent = 'Produto';
 
-    const porProduto = {}; // cod_produto -> {produto, valor}
+    const porProduto = {}; // cod_produto -> {produto, normal, promocao}
     linhasRows.forEach(r => {
       const key = r.cod_produto || '(sem código)';
-      if (!porProduto[key]) porProduto[key] = { produto: r.produto, valor: 0 };
-      porProduto[key].valor += r.valorFrac;
+      if (!porProduto[key]) porProduto[key] = { produto: r.produto, normal: 0, promocao: 0 };
+      if (r.tipo === 'promocao') porProduto[key].promocao += r.valorFrac;
+      else porProduto[key].normal += r.valorFrac;
     });
-    const ranking = Object.entries(porProduto).sort((a,b) => b[1].valor - a[1].valor);
-    buildLinhaChart(ranking.map(([cod,info]) => `${cod} - ${info.produto}`.slice(0,40)), ranking.map(([,info]) => info.valor));
+    const ranking = Object.entries(porProduto)
+      .map(([cod, info]) => ({ cod, ...info, total: info.normal + info.promocao }))
+      .sort((a, b) => b.total - a.total);
+    buildLinhaChart(
+      ranking.map(r => `${r.cod} - ${r.produto}`.slice(0, 40)),
+      ranking.map(r => r.normal),
+      ranking.map(r => r.promocao),
+    );
 
     document.getElementById('linhaRankingInfo').textContent = ranking.length + ' produtos';
-    document.getElementById('linhaRankingTbody').innerHTML = ranking.map(([cod, info], idx) => {
-      const pct = totalRecorte ? (info.valor/totalRecorte*100) : 0;
+    document.getElementById('linhaRankingTbody').innerHTML = ranking.map((r, idx) => {
+      const pct = totalRecorte ? (r.total/totalRecorte*100) : 0;
       return `<tr>
         <td style="text-align:center;color:var(--cinza-texto);font-weight:700;">${idx+1}</td>
-        <td><strong>${cod}</strong> - ${info.produto}</td>
-        <td>${fmtBRL(info.valor)}</td>
+        <td><strong>${r.cod}</strong> - ${r.produto}</td>
+        <td>${fmtBRL(r.normal)}</td>
+        <td>${fmtBRL(r.promocao)}</td>
+        <td>${fmtBRL(r.total)}</td>
         <td><strong>${pct.toFixed(2)}%</strong></td>
       </tr>`;
     }).join('');
 
     // tabela extra de produtos (redundante com o ranking acima quando ja
     // filtrado por linha, mas mantida visivel/separada por clareza quando
-    // um produto especifico tambem estiver selecionado)
-    document.getElementById('produtosSectionTitle').style.display = '';
-    document.getElementById('produtosWrap').style.display = '';
+    // um produto especifico tambem estiver selecionado -- some quando o
+    // filtro ativo e de Tipo de Promocao, ja que o grafico acima ja cobre)
+    document.getElementById('produtosSectionTitle').style.display = linhasDaPromocao !== null ? 'none' : '';
+    document.getElementById('produtosWrap').style.display = linhasDaPromocao !== null ? 'none' : '';
     document.getElementById('produtosInfo').textContent = ranking.length + ' produtos';
-    document.getElementById('produtosTbody').innerHTML = ranking.map(([cod, info], idx) => {
-      const pct = totalRecorte ? (info.valor/totalRecorte*100) : 0;
+    document.getElementById('produtosTbody').innerHTML = ranking.map((r, idx) => {
+      const pct = totalRecorte ? (r.total/totalRecorte*100) : 0;
       return `<tr>
         <td style="text-align:center;color:var(--cinza-texto);font-weight:700;">${idx+1}</td>
-        <td><strong>${cod}</strong></td>
-        <td>${info.produto}</td>
-        <td>${fmtBRL(info.valor)}</td>
+        <td><strong>${r.cod}</strong></td>
+        <td>${r.produto}</td>
+        <td>${fmtBRL(r.normal)}</td>
+        <td>${fmtBRL(r.promocao)}</td>
+        <td>${fmtBRL(r.total)}</td>
         <td><strong>${pct.toFixed(2)}%</strong></td>
       </tr>`;
     }).join('');
   }
 
-  // ---- comparacao entre distribuidores, sempre no recorte atual completo ----
-  const porDist = {};
-  linhasRows.forEach(r => {
-    porDist[r.dcode] = (porDist[r.dcode] || 0) + r.valorFrac;
+  // ---- comparacao entre distribuidores ----
+  // "Venda Normal" é sempre o total do distribuidor no PERÍODO inteiro (só
+  // respeita Período/Regional/Distribuidor da barra de cima) -- não fica
+  // restrita à Categoria/Linha/Produto/Tipo de Promoção selecionados, para
+  // servir de referência do volume normal de compra desse distribuidor.
+  // "Venda Promoção" continua respeitando o recorte atual (linha, produto
+  // ou tipo de promoção selecionados) -- é o "quanto desse recorte foi
+  // promoção" que interessa comparar contra o Normal.
+  const normalPorDist = {};
+  ITEM_PRODUTO_MENSAL.forEach(r => {
+    if (r.tipo !== 'normal') return;
+    if (!passaFiltroDist(r.dcode)) return;
+    const frac = fracaoOverlapMes(r.mes - 1, inicioIso, fimIso);
+    if (frac <= 0) return;
+    normalPorDist[r.dcode] = (normalPorDist[r.dcode] || 0) + r.valor * frac;
   });
-  const rankingDist = Object.entries(porDist).sort((a,b) => b[1]-a[1]);
-  document.getElementById('linhaDistToolbarTitle').textContent = 'Distribuidores — ' + escopoLabel;
+  const promoPorDist = {};
+  linhasRows.forEach(r => {
+    if (r.tipo !== 'promocao') return;
+    promoPorDist[r.dcode] = (promoPorDist[r.dcode] || 0) + r.valorFrac;
+  });
+  const todosDcodesDist = new Set([...Object.keys(normalPorDist), ...Object.keys(promoPorDist)]);
+  const rankingDist = Array.from(todosDcodesDist).map(dcode => {
+    const normal = normalPorDist[dcode] || 0;
+    const promocao = promoPorDist[dcode] || 0;
+    const total = normal + promocao;
+    return { dcode, normal, promocao, total, pctPromo: total ? (promocao / total) : 0 };
+  }).sort((a, b) => b.pctPromo - a.pctPromo);
+  document.getElementById('linhaDistToolbarTitle').textContent = 'Distribuidores — Normal (período completo) x Promoção (' + escopoLabel + ')';
   document.getElementById('linhaDistInfo').textContent = rankingDist.length + ' distribuidores';
-  document.getElementById('linhaDistTbody').innerHTML = rankingDist.map(([dcode, valor], idx) => {
-    const info = DIST_MAP[dcode] || {};
-    const pct = totalRecorte ? (valor/totalRecorte*100) : 0;
+  document.getElementById('linhaDistTbody').innerHTML = rankingDist.map((r, idx) => {
+    const info = DIST_MAP[r.dcode] || {};
     return `<tr>
       <td style="text-align:center;color:var(--cinza-texto);font-weight:700;">${idx+1}</td>
-      <td><strong>${info.nome || dcode}</strong><br><span style="font-size:.7rem;color:var(--cinza-texto)">${dcode}</span></td>
+      <td><strong>${info.nome || r.dcode}</strong><br><span style="font-size:.7rem;color:var(--cinza-texto)">${r.dcode}</span></td>
       <td>${info.regional || '—'}</td>
-      <td>${fmtBRL(valor)}</td>
-      <td><strong>${pct.toFixed(2)}%</strong></td>
+      <td>${fmtBRL(r.normal)}</td>
+      <td>${fmtBRL(r.promocao)}</td>
+      <td><strong>${fmtBRL(r.total)}</strong></td>
+      <td><strong>${(r.pctPromo*100).toFixed(1)}%</strong></td>
     </tr>`;
   }).join('');
 
@@ -1120,6 +1325,24 @@ async function init() {
       const opt = document.createElement('option');
       opt.value = d.dcode; opt.textContent = d.nome;
       sel.appendChild(opt);
+    });
+
+    // popula filtro de Tipo de Promoção (lista estática do Calendário 2026)
+    const selTipoPromo = document.getElementById('f-tipo-promocao');
+    Object.keys(TIPO_PROMOCAO_CALENDARIO).forEach(tipo => {
+      const opt = document.createElement('option');
+      opt.value = tipo; opt.textContent = tipo;
+      selTipoPromo.appendChild(opt);
+    });
+    selTipoPromo.addEventListener('change', () => {
+      // Tipo de Promoção e Linha/Produto sao dimensoes diferentes de filtro
+      // (uma promocao pode cobrir varias linhas) -- selecionar uma reseta a
+      // outra, pra nao ficarem competindo.
+      if (selTipoPromo.value !== 'todos') {
+        document.getElementById('f-linha').value = 'todas';
+        document.getElementById('f-produto').value = 'todos';
+      }
+      renderLinhas();
     });
 
     // popula abas de mês
@@ -1150,12 +1373,26 @@ async function init() {
     document.getElementById('f-regional').addEventListener('change', aplicarFiltro);
     document.getElementById('f-distribuidor').addEventListener('change', aplicarFiltro);
     document.getElementById('f-categoria-linha').addEventListener('change', renderLinhas);
-    document.getElementById('f-linha').addEventListener('change', renderLinhas);
+    document.getElementById('f-linha').addEventListener('change', () => {
+      document.getElementById('f-tipo-promocao').value = 'todos';
+      renderLinhas();
+    });
     document.getElementById('f-produto').addEventListener('change', renderLinhas);
+
+    // tabela de ranking (Linhas/Produtos) comeca recolhida, por ser longa --
+    // clicar no cabecalho (ou na seta) abre/fecha
+    document.getElementById('linhaRankingToggle').addEventListener('click', () => {
+      const wrap = document.getElementById('linhaRankingTableWrap');
+      const chevron = document.getElementById('linhaRankingChevron');
+      const estaFechada = wrap.style.display === 'none';
+      wrap.style.display = estaFechada ? '' : 'none';
+      chevron.style.transform = estaFechada ? 'rotate(180deg)' : 'rotate(0deg)';
+    });
     window.addEventListener('resize', () => Object.values(charts).forEach(c => c.resize()));
 
-    // navegacao por abas -- "Visao Geral" fica identica a hoje; a nova aba
-    // "Linhas & Produtos" compartilha a mesma barra de filtros do topo.
+    // navegacao por abas -- "Visao Geral" fica identica a hoje; a aba
+    // "Linhas & Produtos" compartilha a mesma barra de filtros do topo
+    // (Periodo/Regional/Distribuidor).
     document.querySelectorAll('.tab-btn').forEach(btn => {
       btn.addEventListener('click', () => {
         document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
